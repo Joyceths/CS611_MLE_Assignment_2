@@ -1,0 +1,57 @@
+# usage:  docker-compose build   then   docker-compose up
+# Airflow UI: http://localhost:8080   (user: admin / password: admin)
+x-airflow-common: &airflow-common
+  build: .
+  image: cs611-ml-pipeline:latest
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+    AIRFLOW__CORE__FERNET_KEY: PAqBeGJLJTYFzVkOGHWIYXdLO7XdXz5yTdxAGJe9ezM=
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"   # backfill starts as soon as the scheduler is up
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "60"
+    PROJECT_DIR: /opt/airflow/project
+  volumes:
+    - airflow_data:/opt/airflow
+    - ./dags:/opt/airflow/dags
+    - ./utils:/opt/airflow/project/utils
+    - ./data:/opt/airflow/project/data
+    - ./datamart:/opt/airflow/project/datamart
+    - ./model_bank:/opt/airflow/project/model_bank
+    - ./monitoring_report:/opt/airflow/project/monitoring_report
+
+services:
+  # bind-mounted output folders must be writable by the airflow user (matters on Linux hosts)
+  init-permissions:
+    <<: *airflow-common
+    user: "0:0"
+    entrypoint: >
+      /bin/bash -c "mkdir -p /opt/airflow/project/datamart /opt/airflow/project/model_bank /opt/airflow/project/monitoring_report &&
+      chmod -R a+rwX /opt/airflow/project/datamart /opt/airflow/project/model_bank /opt/airflow/project/monitoring_report"
+
+  airflow-init:
+    <<: *airflow-common
+    depends_on:
+      init-permissions:
+        condition: service_completed_successfully
+    entrypoint: >
+      /bin/bash -c "airflow db migrate &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+
+  airflow-webserver:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  airflow-scheduler:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: scheduler
+
+volumes:
+  airflow_data:
